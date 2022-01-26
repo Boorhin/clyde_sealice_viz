@@ -1,0 +1,11 @@
+dash==2.0.0
+dash_bootstrap_components==1.0.2
+gunicorn==20.1.0
+gcsfs2021.11.1
+xarray==0.15.1
+google-cloud==1.43.0
+numpy==1.18.1
+datashader==0.11.1
+plotly==5.5.0
+colorcet==3.0.0
+pyproj==3.2.1
