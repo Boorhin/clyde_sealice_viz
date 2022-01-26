@@ -23,6 +23,9 @@ from datashader import transfer_functions as tf
 from datetime import datetime, timedelta
 import os.path
 from pyproj import Proj
+import dash
+from dash import dcc as dcc
+from dash import html as html
 
 def list_blobs_with_prefix(bucket_name, prefix, delimiter=None):
     blobs = storage_client.list_blobs(bucket_name, prefix=prefix, delimiter=delimiter)
@@ -121,9 +124,10 @@ def rasterize(ds_host, r, resolution_M, days, res_h,res_v, span=None):
                        [coords_lon[-1], coords_lat[0]],
                        [coords_lon[-1], coords_lat[-1]],
                        [coords_lon[0], coords_lat[-1]]]
-    return tf.shade(agg, cmap=fire, how='linear', span=span).to_pil()
+    return tf.shade(agg, cmap=fire, how='linear', span=span).to_pil(), coordinates
 
-Mk_figure(img,span, farm_loc, computed_farms):
+def Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v):
+    img, coordinates = rasterize(ds_host, r, resolution_M, days, res_h,res_v, span=span)
     fig= go.Figure()
     fig.add_trace(go.Scatter(x=[None], y=[None],marker=go.scatter.Marker(
                     colorscale=fire,
@@ -181,6 +185,7 @@ Mk_figure(img,span, farm_loc, computed_farms):
                         }]))
     return fig
 
+
 storage_client = storage.Client()
 prefix='Clyde_trajectories/'
 farm_names=list_blobs_with_prefix('sealice_db',prefix=prefix,delimiter='/')
@@ -192,7 +197,7 @@ if not os.path.isfile(npfile):
 farm_loc=np.load(npfile)
 
 # scale
-resolution_M=[30,50,100,500]
+resolution_M=[30,50,100,200]
 center_lat,center_lon=55.7,-5.23
 res_h,res_v= scaling_func(center_lat,center_lon, resolution_M)
 
@@ -207,15 +212,53 @@ span=[0,18] # value extent
 days=31+8 # duration hardcoded will need to be added as attribute of ds_host
 span=[0,18]
 
-img=rasterize(ds_host, r, resolution_M, days, res_h,res_v, span=span)
+#img=rasterize(ds_host, r, resolution_M, days, res_h,res_v, span=span)
 
-import dash
-import dash_core_components as dcc
-import dash_html_components as html
+app = dash.Dash(__name__,
+                external_stylesheets=[dbc.themes.BOOTSTRAP],
+                meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
 
-app = dash.Dash()
-app.layout = html.Div([
-    dcc.Graph(figure=fig)
+app.title="Heatmap Dashboard"
+app.layout = dbc.Container([
+    html.Div([
+        html.H1('Visualisation of the Clyde'),
+        dcc.Slider(
+            id='resolution-slider',
+            min=30,
+            max=500,
+            step=None,
+            marks={
+                30:'30m',
+                50:'50m',
+                100:'100m',
+                200:'200m',
+            },
+            value=100
+                  ),
+        dcc.RangeSlider(
+            id='span-slider',
+            min=0,
+            max=20,
+            step=0.5,
+            value=[0,4]
+        ),
+        dcc.Graph(
+            id='heatmap'
+            figure=Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v))
+    ])
 ])
 
-app.run_server(debug=True, use_reloader=False)  # Turn off reloader if inside Jupyter
+@app.callback(
+    Output('heatmap', 'children'),
+    Input('resolution-slider','value'),)
+def update_resolution(r)
+    return Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v)
+
+@app.callback(
+    Output('heatmap', 'children'),
+    Input('span-slider','value'),)
+def update_span(span)
+    return Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v)
+
+if __name__ == '__main__':
+    app.server(host='0.0.0.0', port=8080, debug=True)
