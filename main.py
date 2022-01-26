@@ -26,6 +26,8 @@ from pyproj import Proj
 import dash
 from dash import dcc as dcc
 from dash import html as html
+from dash.dependencies import Input, Output, State
+import dash_bootstrap_components as dbc
 
 def list_blobs_with_prefix(bucket_name, prefix, delimiter=None):
     blobs = storage_client.list_blobs(bucket_name, prefix=prefix, delimiter=delimiter)
@@ -145,9 +147,9 @@ def Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_
                         marker=dict(color='lightblue')     
                 ))
     fig.add_trace(go.Scattermapbox(
-                        lon=farm_loc[sub_data][:,-1],
-                        lat=farm_loc[sub_data][:,-2],
-                        text=[farm_loc[sub_data][:,0]],
+                        lon=farm_loc[computed_farms][:,-1],
+                        lat=farm_loc[computed_farms][:,-2],
+                        text=[farm_loc[computed_farms][:,0]],
                         marker={'size':8,'color':'darkgreen'},
                         name="Processed farm",
                         hoverinfo='all',                  
@@ -205,7 +207,7 @@ res_h,res_v= scaling_func(center_lat,center_lon, resolution_M)
 ds_host= concatenate_data(farm_names, time_slice=None)
 
 # list computed farms
-Computed_farms=list_computed(farm_names, farm_loc)
+computed_farms=list_computed(farm_names, farm_loc)
 
 r=1#choice of resolution
 span=[0,18] # value extent
@@ -243,7 +245,7 @@ app.layout = dbc.Container([
             value=[0,4]
         ),
         dcc.Graph(
-            id='heatmap'
+            id='heatmap',
             figure=Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v))
     ])
 ])
@@ -251,14 +253,14 @@ app.layout = dbc.Container([
 @app.callback(
     Output('heatmap', 'children'),
     Input('resolution-slider','value'),)
-def update_resolution(r)
+def update_resolution(r):
     return Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v)
 
 @app.callback(
     Output('heatmap', 'children'),
     Input('span-slider','value'),)
-def update_span(span)
+def update_span(span):
     return Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v)
 
 if __name__ == '__main__':
-    app.server(host='0.0.0.0', port=8080, debug=True)
+    app.run_server(host='0.0.0.0', port=8080, debug=True)
