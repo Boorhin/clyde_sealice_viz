@@ -7,7 +7,7 @@
 # The app is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details., see 
+# GNU General Public License for more details., see
 # <https://www.gnu.org/licenses/>.
 #
 # Copyright 2022, Julien Moreau, Plastic@Bay CIC
@@ -45,15 +45,16 @@ def grab_farm_ds(farm_name, time_slice=None, shift=0):
     grab the data of a farm and recover the data through a slice of time
     time=slice("2000-01-01", "2000-01-02")
     '''
-    gcs_bucket_name ='sealice_db/'+farm_name  
-    gcsmap = gcsfs.mapping.GCSMap(gcs_bucket_name)
-    ds=xr.open_zarr(gcsmap)
-    if time_slice==None:
-        time_slice=ds.time
-    subds=ds.loc[dict(time=time_slice)].where(np.greater(ds.copepodid,0), drop=True)
+    fs = gcsfs.GCSFileSystem()
+    gcs_bucket_name ='sealice_db/'+farm_name
+    gcsmap = gcsfs.mapping.GCSMap(gcs_bucket_name, gcs=fs, check=True, create=False)
+    with xr.open_zarr(gcsmap) as ds:
+    	if time_slice==None:
+  	      time_slice=ds.time
+    	subds=ds.loc[dict(time=time_slice)].where(np.greater(ds.copepodid,0), drop=True)
                 #np.logical_and(
                 #np.less(ds.age_seconds, timedelta(days=18).total_seconds()),
-    mask=np.ma.masked_invalid(subds['copepodid'].values).mask
+    	mask=np.ma.masked_invalid(subds['copepodid'].values).mask
     return {
         'trajectory':('trajectory', np.arange(np.array(subds['lat'].values[~mask].ravel().shape).prod())+shift),
         'lat':('trajectory',subds['lat'].values[~mask].ravel()),
@@ -68,13 +69,13 @@ def get_farm_data(npfile):
     '''
     from google.cloud import storage
     client = storage.Client()
-    bucket = client.get_bucket('sealice_db')    
+    bucket = client.get_bucket('sealice_db')
     blob = bucket.blob(npfile)
     blob.download_to_filename(npfile)
-    
+
 def scaling_func(center_lat,center_lon, resolution_M):
     '''
-    Allow calculating metric resolutions near a center point. 
+    Allow calculating metric resolutions near a center point.
     '''
     p=Proj("epsg:27700", preserve_units=False)
     x,y=p(center_lon,center_lat)
@@ -85,33 +86,54 @@ def scaling_func(center_lat,center_lon, resolution_M):
         res_v.append(lat-center_lat)
     return res_h,res_v
 
-def concatenate_data(farm_names, time_slice=None):
+def is_not_computed(name):
+    fs=gcsfs.GCSFileSystem()
+    farm_names= fs.ls('sealice_db/Clyde_trajectories')
+    ff=[]
+    for n in farm_names:
+    	ff.append(n.split('/')[-2])
+    print (ff)
+    if name in ff:
+        return False
+    else:
+        return True
+
+def concatenate_data(farm_names, store, time_slice=None):
     '''
     Concatenate the different trajectory dataset into a single file
     '''
+    import zarr
     # should integrate zarr appending here
     ds_host=xr.Dataset()
+    ds_host.attrs['computed']=[]
     selected_farms=farm_names
     #selected_farms.pop(3)
     for farm in selected_farms:
         print('Merging farm: ',farm)
-        if 'trajectory' in list(ds_host.coords):
-            shift+=len(ds_host.trajectory)
+        if farm not in ds_host.attrs['computed']:
+            if 'trajectory' in list(ds_host.coords):
+                shift+=len(ds_host.trajectory)
+            else:
+                shift=0
+            ds_host=ds_host.combine_first(xr.Dataset(grab_farm_ds(farm, time_slice=None, shift=shift)))
+            ds_host.attrs['computed'].append(farm)
+            print('{} done'.format(farm))
         else:
-            shift=0
-        ds_host=ds_host.combine_first(xr.Dataset(grab_farm_ds(farm, time_slice=None, shift=shift)))
-        print('{} done'.format(farm))
+        	print('farm already merged')
     print('All farms merged')
-    return ds_host
+    ds_host.to_zarr(store)
+    zarr.consolidate_metadata(store)
+    return
 
 def list_computed(farm_names, farm_loc):
     ff=[]
-    for n in farm_names:  
-        ff.append(n.split('/')[-2]) 
+    for n in farm_names:
+        ff.append(n.split('/')[-2])
     return (farm_loc[:,0][:,None]==np.array(ff)).any(axis=1)
 
 def rasterize(ds_host, r, resolution_M, days, res_h,res_v, span=None):
-    V_arc,H_arc=ds_host.lat.max()-ds_host.lat.min(),ds_host.lon.max()-ds_host.lon.min()    
+    print('rasterizing...')
+    V_arc,H_arc=ds_host.lat.max()-ds_host.lat.min(),ds_host.lon.max()-ds_host.lon.min()
     ds_host['norm_cop']=ds_host.copepodid/(days*resolution_M[r]**2)
     #compute the canvas
     cvs = DS.Canvas(plot_width=int(H_arc//res_h[r]), \
@@ -126,9 +148,11 @@ def rasterize(ds_host, r, resolution_M, days, res_h,res_v, span=None):
                        [coords_lon[-1], coords_lat[0]],
                        [coords_lon[-1], coords_lat[-1]],
                        [coords_lon[0], coords_lat[-1]]]
+    print('rasterizing done.')
     return tf.shade(agg, cmap=fire, how='linear', span=span).to_pil(), coordinates
 
 def Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v):
+    print('Making figure ...')
     img, coordinates = rasterize(ds_host, r, resolution_M, days, res_h,res_v, span=span)
     fig= go.Figure()
     fig.add_trace(go.Scatter(x=[None], y=[None],marker=go.scatter.Marker(
@@ -144,7 +168,7 @@ def Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_
                         text=[farm_loc[:,0]],
                         name="Awaiting completion farm",
                         hoverinfo='all',
-                        marker=dict(color='lightblue')     
+                        marker=dict(color='lightblue')
                 ))
     fig.add_trace(go.Scattermapbox(
                         lon=farm_loc[computed_farms][:,-1],
@@ -152,7 +176,7 @@ def Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_
                         text=[farm_loc[computed_farms][:,0]],
                         marker={'size':8,'color':'darkgreen'},
                         name="Processed farm",
-                        hoverinfo='all',                  
+                        hoverinfo='all',
                 ))
     fig.add_annotation(
                 xref="x domain",
@@ -204,7 +228,10 @@ center_lat,center_lon=55.7,-5.23
 res_h,res_v= scaling_func(center_lat,center_lon, resolution_M)
 
 # build the database NEXT zarr it so that we don't recompute it each time
-ds_host= concatenate_data(farm_names, time_slice=None)
+fs = gcsfs.GCSFileSystem()
+gcs_bucket_name ='sealice_db/trajectories_archive.zarr'
+gcsmap = gcsfs.mapping.GCSMap(gcs_bucket_name, gcs=fs, check=True, create=False)
+ds_host=xr.open_zarr(store, mode='r')
 
 # list computed farms
 computed_farms=list_computed(farm_names, farm_loc)
@@ -223,27 +250,41 @@ app = dash.Dash(__name__,
 app.title="Heatmap Dashboard"
 app.layout = dbc.Container([
     html.Div([
-        html.H1('Visualisation of the Clyde'),
+        html.H1('Visualisation of the Clyde sealice densities'),
+        html.P('Refrain from updating too frequently, this costs money ;)'),
+        html.H3('Change resolution'),
         dcc.Slider(
             id='resolution-slider',
-            min=30,
-            max=500,
+            min=0,
+            max=3,
             step=None,
             marks={
-                30:'30m',
-                50:'50m',
-                100:'100m',
-                200:'200m',
+                0:'30m',
+                1:'50m',
+                2:'100m',
+                3:'200m',
             },
-            value=100
+            value=1
                   ),
+        html.H4('Change colorscale'),
         dcc.RangeSlider(
             id='span-slider',
             min=0,
             max=20,
             step=0.5,
+            marks={
+                0:'0',
+                1:'1',
+                2:'2',
+                3:'3',
+                4:'4',
+                5:'5',
+                10:'10',
+                18:'18'
+            },
             value=[0,4]
         ),
+        html.H3('Green dots are processed/ing farms, unit is copepodid/sqm/day'),
         dcc.Graph(
             id='heatmap',
             figure=Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v))
@@ -251,16 +292,12 @@ app.layout = dbc.Container([
 ])
 
 @app.callback(
-    Output('heatmap', 'children'),
-    Input('resolution-slider','value'),)
-def update_resolution(r):
-    return Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v)
-
-@app.callback(
-    Output('heatmap', 'children'),
-    Input('span-slider','value'),)
-def update_span(span):
+    Output('heatmap', 'figure'),
+    [Input('resolution-slider','value'),
+    Input('span-slider','value'),
+    ])
+def update_figure(r,span):
     return Mk_figure(span, r, farm_loc, computed_farms,ds_host,resolution_M, days, res_h,res_v)
 
 if __name__ == '__main__':
-    app.run_server(host='0.0.0.0', port=8080, debug=True)
+    app.run_server(host='0.0.0.0', port=9090, debug=True)
