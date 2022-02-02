@@ -1,6 +1,7 @@
 # dataset
 trajectories_archive.zarr/
 modelled_farms.npy
+cache/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

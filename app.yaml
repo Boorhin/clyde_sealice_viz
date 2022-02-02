@@ -1,13 +1,16 @@
 service: default
 runtime: python38
 
+env_variables:
+  TMPDIR: "/my/path"
+#    GAE_MEMORY_MB: 5000
+
 basic_scaling:
-    max_instances: 2
-    idle_timeout: 10m
+    max_instances: 1
+    idle_timeout: 20m
 
-resources:
-    cpu: 2
-    memory_gb: 4
-    disk_size_gb: 10
+default_expiration: "4d 5h"
 
-entrypoint: gunicorn -b 0.0.0.0:8080 main:server
+instance_class: B8
+
+entrypoint: gunicorn -b :$PORT main:app  --timeout 0 --graceful-timeout 1200
