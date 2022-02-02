@@ -5,12 +5,18 @@ env_variables:
   TMPDIR: "/my/path"
 #    GAE_MEMORY_MB: 5000
 
-basic_scaling:
-    max_instances: 1
-    idle_timeout: 20m
+#automatic_scaling:
+
 
 default_expiration: "4d 5h"
 
-instance_class: B8
+inbound_services:
+- warmup
+
+handlers:
+- url: /_ah/warmup
+  script: main.py
+
+instance_class: F4
 
 entrypoint: gunicorn -b :$PORT main:server  --timeout 0 --graceful-timeout 1200

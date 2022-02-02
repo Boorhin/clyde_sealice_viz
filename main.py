@@ -69,7 +69,7 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                         lat=farm_loc[~computed_farms][:,-2],
                         text=farm_loc[~computed_farms][:,0],
                         hovertemplate="<b>%{text}</b><br><br>" +
-                                        "Weight: %{marker.size:.0f}<br>",
+                                        "Biomass: %{marker.size:.0f} tons<br>",
                         name="Awaiting completion farm",
                         hoverinfo='all',
                         marker=dict(color='lightblue',
@@ -93,8 +93,8 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                         hoverinfo='all',
                 ))
     fig.update_layout(
-                height=600,
-                width=600,
+                height=800,
+                width=800,
                 hovermode='closest',
                 showlegend=False,
                 mapbox=dict(
@@ -131,21 +131,21 @@ def mk_curves():
     file_list=fs.ls('sealice_db/Clyde_trajectories/')
     fig_p=go.Figure()
     for i in range(len(file_list)):
-        j=farm_loc[:,0]==file_list[i].split('/')[-1]
-        gcs=gcsfs.mapping.GCSMap('sealice_db/'+farm_names[i],
+        gcs=gcsfs.mapping.GCSMap(file_list[i]+'/',
                                 gcs=fs, check=True, create=False)
         try:
             with xr.open_zarr(gcs) as ds:
                 fig_p.add_trace(go.Scatter(x=ds.time,
                                        y=ds.copepodid.sum(axis=1).values,
-                                       name=str(farm_loc[j,0]),
+                                       name=file_list[i].split('/')[-1],
                                        mode='lines'))
         except:
             print('cannot open:')
             print(file_list[i])
     return fig_p
 
-tab1_content= dbc.Card([
+def tab1_content(radio_items, All_names):
+    return dbc.Card([
     dbc.CardHeader('Clyde area'),
     dbc.CardBody(
         dbc.Row([
@@ -155,15 +155,15 @@ tab1_content= dbc.Card([
                     dbc.Row([
                         dcc.Slider(
                             id='resolution-slider',
-                            min=1,
-                            max=3,
+                            min=0,
+                            max=2,
                             step=None,
                             marks={
-                                1:'50m',
-                                2:'100m',
-                                3:'200m',
+                                0:'50m',
+                                1:'100m',
+                                2:'200m',
                             },
-                            value=2,
+                            value=1,
                             #disabled=True
                              ),
                         ]),
@@ -202,17 +202,19 @@ tab1_content= dbc.Card([
                         id='heatmap',
                         figure=go.Figure()
                         ),
-                    dcc.loading(
+                    dcc.Loading(
                         id='figure_loading',
-                        children=html.Div(id='heatmap')
-                        )
+                        children=html.Div(id='heatmap_output'),
+                        type='graph',
+                        fullscreen=True)
+
                     ])
                 )
             ]),
         dbc.Row([
+            dbc.CardHeader('Select farms'),
             dbc.CardBody(
                 dbc.Row([
-                        html.H3('Select farms'),
                         dcc.Checklist(
                             id='farm_names',
                             options=radio_items,
@@ -224,42 +226,37 @@ tab1_content= dbc.Card([
     )
 ])
 
-tab2_content=dbc.Card([
+def tab2_content():
+    return dbc.Card([
     dbc.CardHeader('Computation progress'),
     dbc.CardBody(
         dbc.Row([
             dcc.Graph(
                 id='progress-curves',
-                figure=mk_curves()
+                figure=mk_curves(farm_loc)
             )
         ])
     )
 ])
 
-##### variables ####
-#r=1#choice of resolution
 span=[0,2] # value extent
-resolution_M=[100]
+resolution_M=[50,100,200]
 center_lat,center_lon=55.7,-5.23
-
 print('loading dataset')
-uri='gs://sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[0])
+uri='gs://sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[1])
 fs = gcsfs.GCSFileSystem()
 gcs_bucket_name ='sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[0])
 gcsmap = gcsfs.mapping.GCSMap(gcs_bucket_name, gcs=fs, check=True, create=False)
 super_ds=open_zarr(gcsmap)
 All_names=list(super_ds.keys())
-
-#coordinates=get_coordinates(super_ds.to_stacked_array('v', ['lat', 'lon']).sum(dim='v'))
-
 npfile='/tmp/modelled_farms.npy'
 if not os.path.isfile(npfile):
         get_farm_data(npfile)
 farm_loc=np.load(npfile)
 print('farm loaded')
-
 computed_farms=(farm_loc[:,0][:,None]==np.array(All_names)).any(axis=1)
 radio_items=[{'label':All_names[i],'value': All_names[i]} for i in range(len(All_names))]
+
 
 app = dash.Dash(__name__,
                 external_stylesheets=[dbc.themes.BOOTSTRAP],
@@ -270,6 +267,14 @@ cache = Cache(app.server, config={
     'CACHE_DIR': '/tmp'
 })
 timeout = 300
+
+@server.route('/_ah/warmup')
+def warmup():
+    """Warm up an instance of the app."""
+    pass
+    # Handle your warmup logic here, e.g. set up a database connection pool
+
+
 app.title="Heatmap Dashboard"
 app.layout = dbc.Container([
     #header
@@ -280,8 +285,8 @@ app.layout = dbc.Container([
     # Define tabs
     html.Div([
         dbc.Tabs([
-            dbc.Tab(tab1_content,label='Interactive map',tab_id='tab-main',),
-            dbc.Tab(tab2_content,label='Live progress graph',tab_id='tab-graph',),
+            dbc.Tab(tab1_content(radio_items, All_names),label='Interactive map',tab_id='tab-main',),
+            dbc.Tab(tab2_content(),label='Live progress graph',tab_id='tab-graph',),
         ])
     ])
 ])
@@ -289,11 +294,10 @@ app.layout = dbc.Container([
 
 
 @cache.memoize(timeout=timeout)
-def global_store():
+def global_store(r):
     print('using global store')
-    uri='gs://sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[0])
     fs = gcsfs.GCSFileSystem()
-    gcs_bucket_name ='sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[0])
+    gcs_bucket_name ='sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[r])
     gcsmap = gcsfs.mapping.GCSMap(gcs_bucket_name, gcs=fs, check=True, create=False)
     super_ds=open_zarr(gcsmap)
     All_names=list(super_ds.keys())
@@ -303,19 +307,23 @@ def global_store():
 
 
 @app.callback(
+    [
     Output('heatmap', 'figure'),
+    Output('heatmap_output', 'children')
+    ],
     [
     Input('span-slider','value'),
-    Input('farm_names','value')
+    Input('farm_names','value'),
+    Input('resolution-slider','value')
     ],
     [State('heatmap', 'figure')])
-def update_figure(span, name_list, fig):
+def update_figure(span, name_list,r, fig):
 
     if fig['data'] ==[]:
         fig=make_base_figure(farm_loc,computed_farms,
                             center_lat, center_lon, span)
 
-    super_ds, coordinates=global_store()
+    super_ds, coordinates=global_store(r)
 
     fig['data'][0]['marker']['cmax']=span[1]
     fig['data'][0]['marker']['cmin']=span[0]
@@ -326,7 +334,7 @@ def update_figure(span, name_list, fig):
                                 "source": mk_img(super_ds, name_list, span),
                                 "coordinates": coordinates[::-1]
                             }]
-    return fig
+    return fig,None
 
 if __name__ == '__main__':
     app.run_server(host='0.0.0.0', port=8080, debug=True)
