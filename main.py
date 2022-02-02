@@ -116,6 +116,16 @@ def mk_img(ds_host, name_list, span):
                     cmap=fire, how='linear',
                     span=span).to_pil()
 
+def get_farm_data(npfile):
+    '''
+    Download the farm parameters
+    '''
+    from google.cloud import storage
+    client = storage.Client()
+    bucket = client.get_bucket('sealice_db')
+    blob = bucket.blob(npfile)
+    blob.download_to_filename(npfile)
+    
 ##### variables ####
 #r=1#choice of resolution
 span=[0,2] # value extent
