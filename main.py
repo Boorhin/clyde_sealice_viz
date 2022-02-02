@@ -12,17 +12,17 @@
 #
 # Copyright 2022, Julien Moreau, Plastic@Bay CIC
 
-#import googlecloudprofiler
+import googlecloudprofiler
 
 # Profiler initialization. It starts a daemon thread which continuously
 # collects and uploads profiles. Best done as early as possible.
-#try:
+try:
     # service and service_version can be automatically inferred when
     # running on App Engine. project_id must be set if not running
     # on GCP.
-#    googlecloudprofiler.start(verbose=3)
-#except (ValueError, NotImplementedError) as exc:
-#    print(exc)  # Handle errors here
+    googlecloudprofiler.start(verbose=3)
+except (ValueError, NotImplementedError) as exc:
+    print(exc)  # Handle errors here
 
 import gcsfs
 from  xarray import open_zarr
@@ -83,7 +83,7 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                         lat=farm_loc[computed_farms][:,-2],
                         text=farm_loc[computed_farms][:,0],
                         hovertemplate="<b>%{text}</b><br><br>" +
-                                        "Weight: %{marker.size:.0f}<br>",
+                                        "Biomass: %{marker.size:.0f} tons<br>",
                         marker=dict(color='darkgreen',
                                 size=farm_loc[computed_farms][:,1].astype('int'),
                                 sizemode='area',
@@ -93,8 +93,8 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                         hoverinfo='all',
                 ))
     fig.update_layout(
-                height=500,
-                width=500,
+                height=600,
+                width=600,
                 hovermode='closest',
                 showlegend=False,
                 mapbox=dict(
@@ -123,9 +123,119 @@ def get_farm_data(npfile):
     from google.cloud import storage
     client = storage.Client()
     bucket = client.get_bucket('sealice_db')
-    blob = bucket.blob(npfile)
+    blob = bucket.blob(npfile.split('/')[-1])
     blob.download_to_filename(npfile)
-    
+
+def mk_curves():
+    fs= gcsfs.GCSFileSystem()
+    file_list=fs.ls('sealice_db/Clyde_trajectories/')
+    fig_p=go.Figure()
+    for i in range(len(file_list)):
+        j=farm_loc[:,0]==file_list[i].split('/')[-1]
+        gcs=gcsfs.mapping.GCSMap('sealice_db/'+farm_names[i],
+                                gcs=fs, check=True, create=False)
+        try:
+            with xr.open_zarr(gcs) as ds:
+                fig_p.add_trace(go.Scatter(x=ds.time,
+                                       y=ds.copepodid.sum(axis=1).values,
+                                       name=str(farm_loc[j,0]),
+                                       mode='lines'))
+        except:
+            print('cannot open:')
+            print(file_list[i])
+    return fig_p
+
+tab1_content= dbc.Card([
+    dbc.CardHeader('Clyde area'),
+    dbc.CardBody(
+        dbc.Row([
+            dbc.Card([
+                dbc.CardHeader('Change resolution'),
+                dbc.CardBody(
+                    dbc.Row([
+                        dcc.Slider(
+                            id='resolution-slider',
+                            min=1,
+                            max=3,
+                            step=None,
+                            marks={
+                                1:'50m',
+                                2:'100m',
+                                3:'200m',
+                            },
+                            value=2,
+                            #disabled=True
+                             ),
+                        ]),
+                    ),
+                 ]),
+        dbc.Row([
+            dbc.CardHeader('Change colorscale'),
+            dbc.CardBody(
+                dbc.Row([
+                    html.P('(copepodid/sqm/day)'),
+                    dcc.RangeSlider(
+                        id='span-slider',
+                        min=0,
+                        max=20,
+                        step=0.5,
+                        marks={
+                            0:'0',
+                            1:'1',
+                            2:'2',
+                            3:'3',
+                            4:'4',
+                            5:'5',
+                            10:'10',
+                        },
+                        value=[0,2]
+                    ),
+                    ]),
+                )
+            ]),
+        dbc.Row([
+            dbc.CardBody(
+                dbc.Row([
+                    html.P('Green dots are processed/ing farms, blue dots await processing.'),
+                    html.P('The size of the dots is proportional to the biomass.'),
+                    dcc.Graph(
+                        id='heatmap',
+                        figure=go.Figure()
+                        ),
+                    dcc.loading(
+                        id='figure_loading',
+                        children=html.Div(id='heatmap')
+                        )
+                    ])
+                )
+            ]),
+        dbc.Row([
+            dbc.CardBody(
+                dbc.Row([
+                        html.H3('Select farms'),
+                        dcc.Checklist(
+                            id='farm_names',
+                            options=radio_items,
+                            value=All_names),
+                        ])
+                    )
+                ]),
+        ])
+    )
+])
+
+tab2_content=dbc.Card([
+    dbc.CardHeader('Computation progress'),
+    dbc.CardBody(
+        dbc.Row([
+            dcc.Graph(
+                id='progress-curves',
+                figure=mk_curves()
+            )
+        ])
+    )
+])
+
 ##### variables ####
 #r=1#choice of resolution
 span=[0,2] # value extent
@@ -154,7 +264,7 @@ radio_items=[{'label':All_names[i],'value': All_names[i]} for i in range(len(All
 app = dash.Dash(__name__,
                 external_stylesheets=[dbc.themes.BOOTSTRAP],
                 meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
-
+server=app.server
 cache = Cache(app.server, config={
     'CACHE_TYPE': 'filesystem',
     'CACHE_DIR': '/tmp'
@@ -162,53 +272,17 @@ cache = Cache(app.server, config={
 timeout = 300
 app.title="Heatmap Dashboard"
 app.layout = dbc.Container([
+    #header
     html.Div([
         html.H1('Visualisation of the Clyde sealice densities'),
         html.P('Refrain from updating too frequently, this costs money ;)'),
-        html.H3('Change resolution'),
-        dcc.Slider(
-            id='resolution-slider',
-            min=0,
-            max=3,
-            step=None,
-            marks={
-                0:'30m',
-                1:'50m',
-                2:'100m',
-                3:'200m',
-            },
-            value=2,
-            disabled=True
-             ),
-        html.H4('Change colorscale'),
-        dcc.RangeSlider(
-            id='span-slider',
-            min=0,
-            max=20,
-            step=0.5,
-            marks={
-                0:'0',
-                1:'1',
-                2:'2',
-                3:'3',
-                4:'4',
-                5:'5',
-                10:'10',
-                18:'18'
-            },
-            value=[0,2]
-        ),
-        html.H3('Select farms'),
-        dcc.Checklist(
-        id='farm_names',
-        options=radio_items,
-        value=All_names),
-        html.H3('Green dots are processed/ing farms, unit is copepodid/sqm/day'),
-        dcc.Graph(
-            id='heatmap',
-            figure=go.Figure()
-            ),
-
+        ]),
+    # Define tabs
+    html.Div([
+        dbc.Tabs([
+            dbc.Tab(tab1_content,label='Interactive map',tab_id='tab-main',),
+            dbc.Tab(tab2_content,label='Live progress graph',tab_id='tab-graph',),
+        ])
     ])
 ])
 
@@ -252,7 +326,6 @@ def update_figure(span, name_list, fig):
                                 "source": mk_img(super_ds, name_list, span),
                                 "coordinates": coordinates[::-1]
                             }]
-
     return fig
 
 if __name__ == '__main__':

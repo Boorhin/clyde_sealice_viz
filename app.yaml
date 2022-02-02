@@ -13,4 +13,4 @@ default_expiration: "4d 5h"
 
 instance_class: B8
 
-entrypoint: gunicorn -b :$PORT main:app  --timeout 0 --graceful-timeout 1200
+entrypoint: gunicorn -b :$PORT main:server  --timeout 0 --graceful-timeout 1200
