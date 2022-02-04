@@ -93,8 +93,7 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                         hoverinfo='all',
                 ))
     fig.update_layout(
-                height=800,
-                width=800,
+                height=700,                
                 hovermode='closest',
                 showlegend=False,
                 mapbox=dict(
