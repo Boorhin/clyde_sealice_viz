@@ -2,7 +2,7 @@ service: default
 runtime: python38
 
 env_variables:
-  TMPDIR: "/my/path"
+  TMPDIR: "/tmp"
 #    GAE_MEMORY_MB: 5000
 
 #automatic_scaling:

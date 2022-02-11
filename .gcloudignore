@@ -18,7 +18,11 @@ __pycache__/
 # Ignored by the build system
 /setup.cfg
 
-trajectory_archive.zarr/
+trajectories_archive.zarr/
 modelled_farms.npy
 cache/
 lib/
+tabs/
+callbacks.py
+main_multi.py
+README.md
