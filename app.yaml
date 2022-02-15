@@ -8,7 +8,7 @@ env_variables:
 #automatic_scaling:
 
 
-default_expiration: "4d 5h"
+default_expiration: "30M"
 
 inbound_services:
 - warmup
@@ -17,6 +17,6 @@ handlers:
 - url: /_ah/warmup
   script: main.py
 
-instance_class: F4
+instance_class: F4_1G
 
 entrypoint: gunicorn -b :$PORT main:server  --timeout 0 --graceful-timeout 1200

@@ -12,17 +12,17 @@
 #
 # Copyright 2022, Julien Moreau, Plastic@Bay CIC
 
-# import googlecloudprofiler
-#
-# # Profiler initialization. It starts a daemon thread which continuously
-# # collects and uploads profiles. Best done as early as possible.
-# try:
-#     # service and service_version can be automatically inferred when
-#     # running on App Engine. project_id must be set if not running
-#     # on GCP.
-#     googlecloudprofiler.start(verbose=3)
-# except (ValueError, NotImplementedError) as exc:
-#     print(exc)  # Handle errors here
+import googlecloudprofiler
+
+# Profiler initialization. It starts a daemon thread which continuously
+# collects and uploads profiles. Best done as early as possible.
+try:
+    # service and service_version can be automatically inferred when
+    # running on App Engine. project_id must be set if not running
+    # on GCP.
+    googlecloudprofiler.start(verbose=3)
+except (ValueError, NotImplementedError) as exc:
+    print(exc)  # Handle errors here
 
 import gcsfs
 from  xarray import open_zarr
@@ -47,7 +47,7 @@ from flask_caching import Cache
 #from callbacks import callbacks
 
 def get_coordinates(agg):
-    coords_lat, coords_lon = agg.coords['lat'].values, agg.coords['lon'].values
+    coords_lat, coords_lon = agg.coords['y'].values, agg.coords['x'].values
     coordinates=[[coords_lon[0], coords_lat[0]],
                        [coords_lon[-1], coords_lat[0]],
                        [coords_lon[-1], coords_lat[-1]],
@@ -62,15 +62,9 @@ def mk_img(ds_host, name_list, span, Coeff):
     subds=ds_host[name_list]
     for i in range(len(name_list)):
         subds[name_list[i]].values *=Coeff[i]
-    arr= subds.to_stacked_array('v', ['lat', 'lon']).sum(dim='v').squeeze(drop=True)
-    arr.rio.set_spatial_dims('lon', 'lat', inplace=True)
-    arr = arr.rio.write_crs('EPSG:4326')
-    shp=arr.shape
-    arr2=arr.rio.reproject('EPSG:3857',
-                            shape=shp,
-                            resampling=Resampling.bilinear,
-                            nodata=np.nan)
-    return tf.shade(arr2.where(arr2>0).load(),
+    arr= subds.to_stacked_array('v', ['y', 'x']).sum(dim='v')
+    print('data stacked')
+    return tf.shade(arr.where(arr>0).load(),
                     cmap=fire, how='linear',
                     span=span).to_pil()
 
@@ -106,7 +100,7 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                                         "Biomass: %{marker.size:.0f} tons<br>",
                         name="Awaiting completion farm",
                         hoverinfo='all',
-                        marker=dict(color='lightblue',
+                        marker=dict(color='#5bc0de',
                                 size=farm_loc[~computed_farms][:,1].astype('int'),
                                 sizemode='area',
                                 sizeref=10,
@@ -118,7 +112,7 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                         text=farm_loc[computed_farms][:,0],
                         hovertemplate="<b>%{text}</b><br><br>" +
                                         "Biomass: %{marker.size:.0f} tons<br>",
-                        marker=dict(color='darkgreen',
+                        marker=dict(color='#62c462',
                                 size=farm_loc[computed_farms][:,1].astype('int'),
                                 sizemode='area',
                                 sizeref=10,
@@ -126,10 +120,12 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                         name="Processed farm",
                         hoverinfo='all',
                 ))
+    fig.add_trace(go.Scattermapbox())
     fig.update_layout(
                 height=700,
                 hovermode='closest',
                 showlegend=False,
+                margin=dict(b=5, l=5, r=5, t=5),
                 mapbox=dict(
                     bearing=0,
                     center=dict(
@@ -137,57 +133,66 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                         lon=center_lon,
                     ),
                     pitch=0,
-                    zoom=7,
+                    zoom=6.5,
                     style="carto-darkmatter",
                     ))
     return fig
 
+def mk_map_pres(start, end):
+    return dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader('Legend'),
+                dbc.CardBody([
+                    html.Span([
+                dbc.Badge('Processed/ing farms', color="success",pill=True),
+                dbc.Badge('Farms awaiting processing', color='info',pill=True),
+                dbc.Badge('Farms included in the map', color='light', pill=True),
+                    ]),
+                ])
+            ]),
+        ],width=3),
+        dbc.Col([
+            dbc.Card(
+            dbc.CardBody([
+                dbc.Alert('The size of the disks is proportional to the biomass', color='primary'),
+                dbc.Alert('Hover a farm for more information', color='secondary'),
+                dbc.Alert('Colorscale is the average density of copepodid per sqm from {} to {}'.format(start,end), color='primary'),
+                dbc.Alert('A density of 2 copepodid/sqm/day leads to a 30% daily mortality of smolt', color='warning')
+            ])
+            )
+        ],width=9),
+    ]),
+
 def tab1_layout(farm_loc,computed_farms,center_lat, center_lon, span):
     return dbc.Card([
     dbc.CardHeader('Clyde area'),
-    dbc.CardBody(
-        dbc.Row([
-            dbc.CardBody(
-                dbc.Row([
-                    html.P('Green dots are processed/ing farms, blue dots await processing.'),
-                    html.P('The size of the dots is proportional to the biomass.'),
-                    dcc.Graph(
-                        id='heatmap',
-                        figure=make_base_figure(farm_loc,computed_farms,
-                                            center_lat, center_lon, span)
-                        ),
-                    dcc.Loading(
-                        id='figure_loading',
-                        children=html.Div(id='heatmap_output'),
-                        type='graph',
-                        fullscreen=True)
-                    ])
+    dbc.CardBody([
+        dbc.Card([
+            dbc.CardBody(mk_map_pres(start, end))
+        ]),
+        dbc.Card([
+            dbc.CardBody([
+            dbc.Row([
+                dcc.Graph(
+                    id='heatmap',
+                    figure=make_base_figure(farm_loc,computed_farms,
+                                    center_lat, center_lon, span)
+                    ),
+                dcc.Loading(
+                    id='figure_loading',
+                    children=[html.Div(id='heatmap_output'),],
+                    type='graph',
+                    fullscreen=True
                 )
+                ])
+                ])
             ]),
-            )
         ])
+    ])
 ################# tab2 ###########################3
-marks_biomass={
-    0.1:'10%',
-    0.25:'25%',
-    0.5:'50%',
-    0.75:'75%',
-    1:'100%',
-    1.25:'125%',
-    1.5:'150%',
-    1.75:'175%',
-    2:'200%',
-}
-marks_lice={
-    0.5:'0.25',
-    1:'0.5',
-    2:'1',
-    4:'2',
-    6:'3',
-    8:'4',
-    10:'5',
-}
-def mk_accordion_item(name, farm_loc, i):
+
+def mk_accordion_item(name, farm_loc, i, marks_biomass, marks_lice):
     data=farm_loc[farm_loc[:,0]==name][0]
     item=dbc.Row([
             dbc.Col([
@@ -211,7 +216,7 @@ def mk_accordion_item(name, farm_loc, i):
                     disabled=False
                     ),
                 html.H3('Tune lice infestation:'),
-                html.P('Unit is infective Copepodid/day/sqm'),
+                html.P('Unit is lice/fish'),
                 dcc.Slider(
                     id={'type':'lice_slider','id':i},
                     step=0.05,
@@ -226,6 +231,26 @@ def mk_accordion_item(name, farm_loc, i):
     return item
 
 def tab2_layout(Filtered_names,farm_loc):
+    marks_biomass={
+        0.1:'10%',
+        0.25:'25%',
+        0.5:'50%',
+        0.75:'75%',
+        1:'100%',
+        1.25:'125%',
+        1.5:'150%',
+        1.75:'175%',
+        2:'200%',
+    }
+    marks_lice={
+        0.5:'0.25',
+        1:'0.5',
+        2:'1',
+        4:'2',
+        6:'3',
+        8:'4',
+        10:'5',
+    }
     layout= dbc.Card([
     dbc.Row([
     dbc.Card([
@@ -253,55 +278,54 @@ def tab2_layout(Filtered_names,farm_loc):
                         ),
                      ]),
             dbc.Row([
-                dbc.CardHeader('Change map colorscale range'),
-                dbc.CardBody(
-                    dbc.Row([
-                        html.P('(copepodid/sqm/day)'),
-                        dcc.RangeSlider(
-                            id='span-slider',
-                            min=0,
-                            max=20,
-                            step=0.5,
-                            marks={
-                                0:'0',
-                                1:'1',
-                                2:'2',
-                                3:'3',
-                                4:'4',
-                                5:'5',
-                                10:'10',
-                            },
-                            value=[0,2]
-                        ),
-                        ]),
-                    )
-                ]),
-            dbc.Row([
-                dbc.CardHeader('Change global biomass compared to model'),
-                dbc.CardBody(
-                    dbc.Row([
-                        dcc.Slider(
-                            id='master_biomass_slider',
-                            step=0.05,
-                            marks=marks_biomass,
-                            value=1,
-                            tooltip={"placement": "bottom"})
-                    ])
-                )
-            ]),
-            dbc.Row([
-                dbc.CardHeader('Change global lice infestation compared to model'),
-                dbc.CardBody(
-                    dbc.Row([
-                        dcc.Slider(
-                            id='master_lice_slider',
-                            step=0.05,
-                            marks=marks_lice,
-                            value=1,
-                            tooltip={"placement": "bottom"}
+                dbc.Card([
+                    dbc.CardHeader('Change map colorscale range'),
+                    dbc.CardBody(
+                        dbc.Row([
+                            html.P('(copepodid/sqm/day)'),
+                            dcc.RangeSlider(
+                                id='span-slider',
+                                min=0,
+                                max=20,
+                                step=0.5,
+                                marks={n:'%s' %n for n in range(21)},
+                                value=[0,2]
+                            ),
+                            ]),
                         )
                     ])
-                )
+                ]),
+            dbc.Row([
+                dbc.Card([
+                    dbc.CardHeader('Change global biomass compared to model'),
+                    dbc.CardBody(
+                        dbc.Row([
+                            dcc.Slider(
+                                id='master_biomass_slider',
+                                step=0.05,
+                                marks=marks_biomass,
+                                value=1,
+                                tooltip={"placement": "bottom"})
+                        ])
+                    )
+                ])
+            ]),
+            dbc.Row([
+                dbc.Card([
+                    dbc.CardHeader('Change global lice infestation compared to model (lice/fish)'),
+                    dbc.CardBody(
+                        dbc.Row([
+                            dcc.Slider(
+                                id='master_lice_slider',
+                                step=0.05,
+                                marks=marks_lice,
+                                value=1,
+                                tooltip={"placement": "bottom"},
+
+                            )
+                        ])
+                    )
+                ]),
             ]),
             dbc.Row([
                 dbc.Button("Refresh map",
@@ -319,7 +343,7 @@ def tab2_layout(Filtered_names,farm_loc):
             dbc.CardBody([
                 dbc.Accordion(
                     [dbc.AccordionItem([
-                        mk_accordion_item(Filtered_names[i],farm_loc, i)],
+                        mk_accordion_item(Filtered_names[i],farm_loc, i, marks_biomass, marks_lice)],
                                     title=Filtered_names[i]) for i in range(len(Filtered_names))],
                         start_collapsed=True,
                     )
@@ -331,99 +355,8 @@ def tab2_layout(Filtered_names,farm_loc):
 
 ################### TAB 3 #########################
 
-tab3_layout= dbc.Card([
-    dbc.CardHeader('Computation progress'),
-    dbc.CardBody(
-        dbc.Row([
-            dcc.Graph(
-                id='progress-curves',
-                figure=go.Figure()
-            )
-        ])
-    )
-])
 
-############# VARIABLES ##########################33
-span=[0,2] # value extent
-resolution_M=[50,100,200]
-center_lat,center_lon=55.7,-5.23
-
-if 'All_names' not in globals():
-    print('loading dataset')
-    uri='gs://sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[1])
-    fs = gcsfs.GCSFileSystem()
-    gcs_bucket_name ='sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[0])
-    gcsmap = gcsfs.mapping.GCSMap(gcs_bucket_name, gcs=fs, check=True, create=False)
-    super_ds=open_zarr(gcsmap)
-    All_names=np.array(list(super_ds.keys()))
-
-if 'farm_loc' not in globals():
-    npfile='/tmp/modelled_farms.npy'
-    if not os.path.isfile(npfile):
-            get_farm_data(npfile)
-    farm_loc=np.load(npfile)
-    print('farm loaded')
-
-computed_farms=(farm_loc[:,0][:,None]==np.array(All_names)).any(axis=1)
-Coeff=np.ones(len(All_names[computed_farms]))
-
-#### import the Tabs
-#from tabs.tab1 import tab1_layout
-#from tabs.tab2 import tab2_layout
-#from tabs.tab3 import tab3_layout
-
-app = dash.Dash(__name__,
-                external_stylesheets=[dbc.themes.BOOTSTRAP],
-                meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
-server=app.server
-cache = Cache(app.server, config={
-    'CACHE_TYPE': 'filesystem',
-    'CACHE_DIR': '/tmp'
-})
-timeout = 300
-
-@server.route('/_ah/warmup')
-def warmup():
-    """Warm up an instance of the app."""
-    pass
-    # Handle your warmup logic here, e.g. set up a database connection pool
-
-
-app.title="Heatmap Dashboard"
-app.layout = dbc.Container([
-    #Store
-    html.Div([
-        dcc.Store(id='my-store'),
-    #header
-        html.Div([
-            html.H1('Visualisation of the Clyde sealice densities'),
-            html.P('Refrain from updating too frequently, this costs money ;)'),
-            ]),
-    # Define tabs
-        html.Div([
-            dbc.Tabs([
-                dbc.Tab(tab1_layout(farm_loc,computed_farms,center_lat, center_lon, span),label='Interactive map',tab_id='tab-main',),
-                dbc.Tab(tab2_layout(All_names[computed_farms],farm_loc),label='Tuning dashboard',tab_id='tab-tunning',),
-                dbc.Tab(tab3_layout,label='Live progress graph',tab_id='tab-graph',),
-                ])
-            ])
-        ])
-])
-
-@cache.memoize()
-def global_store(r):
-    print('using global store')
-    fs = gcsfs.GCSFileSystem()
-    gcs_bucket_name ='sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[r])
-    gcsmap = gcsfs.mapping.GCSMap(gcs_bucket_name, gcs=fs, check=True, create=False)
-    super_ds=open_zarr(gcsmap)
-    All_names=list(super_ds.keys())
-    coordinates=get_coordinates(super_ds.to_stacked_array('v', ['lat', 'lon']).sum(dim='v'))
-    print('global store loaded')
-    return super_ds,coordinates
-
-@cache.memoize()
-def mk_curves():
+def mk_curves(start, end):
     fs= gcsfs.GCSFileSystem()
     file_list=fs.ls('sealice_db/Clyde_trajectories/')
     fig_p=go.Figure()
@@ -435,11 +368,118 @@ def mk_curves():
                 fig_p.add_trace(go.Scatter(x=ds.time,
                                        y=ds.copepodid.sum(axis=1).values,
                                        name=file_list[i].split('/')[-1],
-                                       mode='lines'))
+                                       mode='lines', stackgroup='one' ))
         except:
             print('cannot open:')
             print(file_list[i])
+    fig_p.add_vrect(x0=start, x1=end,
+                    annotation_text="mapped time interval",
+                    annotation_position="top left",
+                    opacity=0.25, line_width=0,fillcolor="gray")#"/"
+    fig_p.update_layout(
+        yaxis_title='Number of infective copepodids',
+        margin=dict(b=5, l=5, r=5, t=5),
+    )
     return fig_p
+
+def tab3_layout(start, end):
+    return dbc.Card([
+    dbc.CardHeader('Computation progress'),
+    dbc.CardBody(
+        dbc.Row([
+            dcc.Graph(
+                id='progress-curves',
+                figure=mk_curves(start, end)
+            )
+        ])
+    )
+])
+
+############# VARIABLES ##########################33
+span=[0,2] # value extent
+resolution_M=[50,100,200]
+center_lat,center_lon=55.7,-5.23
+start, end = "2018-05-06", "2018-05-30"
+
+######## fetch data #######
+
+if 'All_names' not in globals():
+    print('loading dataset')
+    uri='gs://sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[1])
+    fs = gcsfs.GCSFileSystem()
+    gcs_bucket_name ='sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[0])
+    gcsmap = gcsfs.mapping.GCSMap(gcs_bucket_name, gcs=fs, check=True, create=False)
+    super_ds=open_zarr(gcsmap).drop('spatial_ref')
+    All_names=np.array(list(super_ds.keys()))
+
+if 'farm_loc' not in globals():
+    npfile='/tmp/modelled_farms.npy'
+    if not os.path.isfile(npfile):
+        get_farm_data(npfile)
+    farm_loc=np.load(npfile)
+    print('Farm loaded')
+
+computed_farms=(farm_loc[:,0][:,None]==np.array(All_names)).any(axis=1)
+Coeff=np.ones(len(All_names[computed_farms]))
+
+coord_file='/tmp/master_coordinates.npy'
+if not os.path.isfile(coord_file):
+    get_farm_data(coord_file)
+coordinates=np.load(coord_file)
+print('Coordinates loaded')
+
+app = dash.Dash(__name__,
+                external_stylesheets=[dbc.themes.SLATE],
+                meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
+server=app.server
+cache = Cache(app.server, config={
+    'CACHE_TYPE': 'filesystem',
+    'CACHE_DIR': '/tmp'
+})
+timeout = 300
+
+@server.route('/_ah/warmup')
+def warmup():
+    """Warm up an instance of the app."""
+    return "it is warm"
+    # Handle your warmup logic here, e.g. set up a database connection pool
+
+
+app.title="Heatmap Dashboard"
+app.layout = dbc.Container([
+    #Store
+    html.Div([
+        dcc.Store(id='my-store'),
+    #header
+        html.Div([
+            html.H1('Visualisation of the Clyde sealice infestation'),
+            #html.P('Refrain from updating too frequently, this costs money ;)'),
+            ]),
+    # Define tabs
+        html.Div([
+            dbc.Tabs([
+                dbc.Tab(tab1_layout(farm_loc,computed_farms,center_lat, center_lon, span),label='Interactive map',tab_id='tab-main',),
+                dbc.Tab(tab2_layout(All_names[computed_farms],farm_loc),label='Tuning dashboard',tab_id='tab-tunning',),
+                dbc.Tab(tab3_layout(start, end),label='Live progress graph',tab_id='tab-graph',),
+                ])
+            ])
+        ])
+], fluid=True)
+
+@cache.memoize()
+def global_store(r):
+    print('using global store')
+    fs = gcsfs.GCSFileSystem()
+    gcs_bucket_name ='sealice_db/aggregations_{}m/master.zarr'.format(resolution_M[r])
+    gcsmap = gcsfs.mapping.GCSMap(gcs_bucket_name, gcs=fs, check=True, create=False)
+    super_ds=open_zarr(gcsmap).drop('spatial_ref')
+    All_names=list(super_ds.keys())
+    coordinates=np.load(coord_file)
+    #get_coordinates(super_ds.to_stacked_array('v', ['y', 'x']).sum(dim='v'))
+    print('global store loaded')
+    return super_ds,coordinates
+
+
 
 @app.callback(
     [Output({'type':'biomass_slider', 'id':MATCH}, 'disabled'),
@@ -479,11 +519,14 @@ def redraw(n_clicks,idx, biomasses, lices, span, r, fig):
     if idx.sum()>0:
         name_list=np.array(All_names)[computed_farms][idx]
         Coeff=biomasses[idx]*lices[idx]
-
         super_ds, coordinates=global_store(r)
 
+        selected_farms=(farm_loc[:,0][:,None]==name_list).any(axis=1)
         fig['data'][0]['marker']['cmax']=span[1]
         fig['data'][0]['marker']['cmin']=span[0]
+        fig['data'][3]=go.Scattermapbox(lat=farm_loc[selected_farms][:,-2],
+                            lon=farm_loc[selected_farms][:,-1],
+                            marker=dict(color='#e9ecef', size=4))
         fig['layout']['mapbox']['layers']=[
                                 {
                                     "below": 'traces',
@@ -493,6 +536,7 @@ def redraw(n_clicks,idx, biomasses, lices, span, r, fig):
                                 }]
     else:
         # add a message?
+        fig['data'][3]={}
         fig['layout']['mapbox']['layers']=[]
     return fig, None
 
