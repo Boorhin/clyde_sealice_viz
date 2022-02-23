@@ -16,3 +16,4 @@ colorcet==3.0.0
 flask_caching==1.10.1
 google-cloud-profiler
 dash_daq==0.5.0
+dash_bootstrap_templates==1.0.5

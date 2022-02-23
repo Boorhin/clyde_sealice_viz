@@ -31,7 +31,7 @@ from google.cloud import storage
 import numpy as np
 import datashader as DS
 import plotly.graph_objects as go
-from colorcet import fire
+from colorcet import fire, bmy
 from datashader import transfer_functions as tf
 from datetime import datetime, timedelta
 import os.path
@@ -40,6 +40,8 @@ from dash import dcc as dcc
 from dash import html as html
 from dash.dependencies import Input, Output, State, MATCH, ALL
 import dash_bootstrap_components as dbc
+from dash_bootstrap_templates import ThemeSwitchAIO, load_figure_template
+
 import dash_daq as daq
 
 from flask_caching import Cache
@@ -54,7 +56,7 @@ def get_coordinates(agg):
                        [coords_lon[0], coords_lat[-1]]]
     return coordinates
 
-def mk_img(ds_host, name_list, span, Coeff):
+def mk_img(ds_host, name_list, span, Coeff,cmp):
     '''
     Create an image to project on mabpox
     '''
@@ -65,7 +67,7 @@ def mk_img(ds_host, name_list, span, Coeff):
     arr= subds.to_stacked_array('v', ['y', 'x']).sum(dim='v')
     print('data stacked')
     return tf.shade(arr.where(arr>0).load(),
-                    cmap=fire, how='linear',
+                    cmap=cmp, how='linear',
                     span=span).to_pil()
 
 def get_farm_data(npfile):
@@ -80,11 +82,11 @@ def get_farm_data(npfile):
 
 #####################TAB 1 ###########################
 
-def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
+def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span, cmp, template):
     print('Making figure ...')
     fig= go.Figure()
     fig.add_trace(go.Scatter(x=[None], y=[None],marker=go.scatter.Marker(
-                        colorscale=fire,
+                        colorscale=cmp,
                         cmax=span[1],
                         cmin=span[0],
                         showscale=True,
@@ -104,6 +106,7 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                                 size=farm_loc[~computed_farms][:,1].astype('int'),
                                 sizemode='area',
                                 sizeref=10,
+                                showscale=False
                         )
                 ))
     fig.add_trace(go.Scattermapbox(
@@ -116,16 +119,18 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span):
                                 size=farm_loc[computed_farms][:,1].astype('int'),
                                 sizemode='area',
                                 sizeref=10,
+                                showscale=False
                         ),
                         name="Processed farm",
                         hoverinfo='all',
                 ))
-    fig.add_trace(go.Scattermapbox())
+    fig.add_trace(go.Scattermapbox(name='Mapped farms'))
     fig.update_layout(
                 height=700,
                 hovermode='closest',
                 showlegend=False,
-                margin=dict(b=5, l=5, r=5, t=5),
+                margin=dict(b=3, l=2, r=5, t=5),
+                template=template,
                 mapbox=dict(
                     bearing=0,
                     center=dict(
@@ -158,13 +163,13 @@ def mk_map_pres(start, end):
                 dbc.Alert('The size of the disks is proportional to the biomass', color='primary'),
                 dbc.Alert('Hover a farm for more information', color='secondary'),
                 dbc.Alert('Colorscale is the average density of copepodid per sqm from {} to {}'.format(start,end), color='primary'),
-                dbc.Alert('A density of 2 copepodid/sqm/day leads to a 30% daily mortality of smolt', color='warning')
+                dbc.Alert('A density of 2 copepodid/sqm/day leads to a 30% mortality of wild smolts each day', color='warning')
             ])
             )
         ],width=9),
     ]),
 
-def tab1_layout(farm_loc,computed_farms,center_lat, center_lon, span):
+def tab1_layout(farm_loc,computed_farms,center_lat, center_lon, span, cmp, template):
     return dbc.Card([
     dbc.CardHeader('Clyde area'),
     dbc.CardBody([
@@ -177,7 +182,7 @@ def tab1_layout(farm_loc,computed_farms,center_lat, center_lon, span):
                 dcc.Graph(
                     id='heatmap',
                     figure=make_base_figure(farm_loc,computed_farms,
-                                    center_lat, center_lon, span)
+                                    center_lat, center_lon, span, cmp, template)
                     ),
                 dcc.Loading(
                     id='figure_loading',
@@ -378,7 +383,7 @@ def mk_curves(start, end):
                     opacity=0.25, line_width=0,fillcolor="gray")#"/"
     fig_p.update_layout(
         yaxis_title='Number of infective copepodids',
-        margin=dict(b=5, l=5, r=5, t=5),
+        margin=dict(b=15, l=15, r=5, t=5),
     )
     return fig_p
 
@@ -428,8 +433,37 @@ if not os.path.isfile(coord_file):
 coordinates=np.load(coord_file)
 print('Coordinates loaded')
 
+######  manage themes #####
+def mk_colorscale(cmp):
+    '''
+    format the colorscale for update in the callback
+    '''
+    idx =np.linspace(0,1,len(cmp))
+    return np.vstack((idx, np.array(cmp))).T
+
+def mk_template(template):
+    '''
+    Format the template for update in the callback
+    '''
+    fig=go.Figure()
+    fig.update_layout(template=template)
+    return fig['layout']['template']
+
+template_theme1 = "slate"
+template_theme2 = "sandstone"
+load_figure_template([template_theme1,template_theme2])
+url_theme1=dbc.themes.SLATE
+url_theme2=dbc.themes.SANDSTONE
+cmp1= fire
+cmp2= bmy
+carto_style1="carto-darkmatter"
+carto_style2="carto-positron"
+dbc_css = (
+    "https://cdn.jsdelivr.net/gh/AnnMarieW/dash-bootstrap-templates@V1.0.1/dbc.min.css"
+)
+
 app = dash.Dash(__name__,
-                external_stylesheets=[dbc.themes.SLATE],
+                external_stylesheets=[url_theme1],#, dbc_css
                 meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}])
 server=app.server
 cache = Cache(app.server, config={
@@ -453,18 +487,22 @@ app.layout = dbc.Container([
     #header
         html.Div([
             html.H1('Visualisation of the Clyde sealice infestation'),
+            ThemeSwitchAIO(aio_id='theme',
+                    icons={"left": "fa fa-sun", "right": "fa fa-moon"},
+                    themes=[url_theme1, url_theme2])
             #html.P('Refrain from updating too frequently, this costs money ;)'),
             ]),
     # Define tabs
         html.Div([
             dbc.Tabs([
-                dbc.Tab(tab1_layout(farm_loc,computed_farms,center_lat, center_lon, span),label='Interactive map',tab_id='tab-main',),
+                dbc.Tab(tab1_layout(farm_loc,computed_farms,center_lat, center_lon, span, cmp1, template_theme1),label='Interactive map',tab_id='tab-main',),
                 dbc.Tab(tab2_layout(All_names[computed_farms],farm_loc),label='Tuning dashboard',tab_id='tab-tunning',),
                 dbc.Tab(tab3_layout(start, end),label='Live progress graph',tab_id='tab-graph',),
                 ])
             ])
         ])
-], fluid=True)
+], fluid=True, className='dbc')
+
 
 @cache.memoize()
 def global_store(r):
@@ -503,42 +541,61 @@ def update_all_sliders(lice, biom, l):
 
 @app.callback(
     [Output('heatmap', 'figure'),
+    Output('progress-curves','figure'),
     Output('heatmap_output', 'children')],
-    Input('submit_map','n_clicks'),
+    [Input('submit_map','n_clicks'),
+    Input(ThemeSwitchAIO.ids.switch("theme"), "value"),],
     [State({'type':'switch', 'id':ALL},'on'),
     State({'type':'biomass_slider', 'id':ALL},'value'),
     State({'type':'lice_slider', 'id':ALL},'value'),
     State('span-slider','value') ,
     State('resolution-slider','value'),
-    State('heatmap', 'figure')]
+    State('heatmap', 'figure'),
+    State('progress-curves','figure'),
+    ]
 )
-def redraw(n_clicks,idx, biomasses, lices, span, r, fig):
-    idx=np.array(idx)
-    biomasses=np.array(biomasses)
-    lices=np.array(lices)
-    if idx.sum()>0:
-        name_list=np.array(All_names)[computed_farms][idx]
-        Coeff=biomasses[idx]*lices[idx]
-        super_ds, coordinates=global_store(r)
+def redraw(n_clicks, toggle, idx, biomasses, lices, span, r, fig, curves):
+    ctx = dash.callback_context
+    ### toggle themes
+    template = template_theme1 if toggle else template_theme2
+    cmp= cmp1 if toggle else cmp2
+    carto_style= carto_style1 if toggle else carto_style2
+    fig['layout']['template']=mk_template(template)
+    curves['layout']['template']=mk_template(template)
+    fig['layout']['mapbox']['style']=carto_style
+    #fig.update_traces(marker=dict(colorscale=cmp))
+    fig['data'][0]['marker']['colorscale']=mk_colorscale(cmp)
+    #print(fig['data'][0]['marker']['colorscale'])
 
-        selected_farms=(farm_loc[:,0][:,None]==name_list).any(axis=1)
-        fig['data'][0]['marker']['cmax']=span[1]
-        fig['data'][0]['marker']['cmin']=span[0]
-        fig['data'][3]=go.Scattermapbox(lat=farm_loc[selected_farms][:,-2],
-                            lon=farm_loc[selected_farms][:,-1],
-                            marker=dict(color='#e9ecef', size=4))
-        fig['layout']['mapbox']['layers']=[
-                                {
-                                    "below": 'traces',
-                                    "sourcetype": "image",
-                                    "source": mk_img(super_ds, name_list, span, Coeff),
-                                    "coordinates": coordinates[::-1]
-                                }]
-    else:
-        # add a message?
-        fig['data'][3]={}
-        fig['layout']['mapbox']['layers']=[]
-    return fig, None
+    ### update heatmap
+    if ctx.triggered[0]['prop_id'] == 'submit_map.n_clicks':
+        idx=np.array(idx)
+        biomasses=np.array(biomasses)
+        lices=np.array(lices)
+        if idx.sum()>0:
+            name_list=np.array(All_names)[computed_farms][idx]
+            Coeff=biomasses[idx]*lices[idx]
+            super_ds, coordinates=global_store(r)
+
+            selected_farms=(farm_loc[:,0][:,None]==name_list).any(axis=1)
+            fig['data'][0]['marker']['cmax']=span[1]
+            fig['data'][0]['marker']['cmin']=span[0]
+            fig['data'][3]=go.Scattermapbox(lat=farm_loc[selected_farms][:,-2],
+                                lon=farm_loc[selected_farms][:,-1],
+                                marker=dict(color='#e9ecef', size=4, showscale=False),
+                                name='Mapped farms')
+            fig['layout']['mapbox']['layers']=[
+                                    {
+                                        "below": 'traces',
+                                        "sourcetype": "image",
+                                        "source": mk_img(super_ds, name_list, span, Coeff,cmp),
+                                        "coordinates": coordinates[::-1]
+                                    }]
+        else:
+            # add a message?
+            fig['data'][3]={}
+            fig['layout']['mapbox']['layers']=[]
+    return fig, curves, None
 
 if __name__ == '__main__':
     app.run_server(host='0.0.0.0', port=8080, debug=True)
