@@ -265,26 +265,48 @@ def tab2_layout(Filtered_names,farm_loc):
         dbc.CardHeader('Modify the global parameters'),
         dbc.CardBody([
             dbc.Row([
-                dbc.Card([
-                    dbc.CardHeader('Change map resolution'),
-                    dbc.CardBody(
-                        dbc.Row([
-                            dcc.Slider(
-                                id='resolution-slider',
-                                min=0,
-                                max=2,
-                                step=None,
-                                marks={
-                                    0:'50m',
-                                    1:'100m',
-                                    2:'200m',
-                                },
-                                value=1,
-                                #disabled=True
-                                 ),
-                            ]),
-                        ),
-                     ]),
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardHeader('Change map resolution'),
+                            dbc.CardBody(
+                                dbc.Row([
+                                    dcc.Slider(
+                                        id='resolution-slider',
+                                        min=0,
+                                        max=2,
+                                        step=None,
+                                        marks={
+                                            0:'50m',
+                                            1:'100m',
+                                            2:'200m',
+                                        },
+                                        value=1,
+                                        #disabled=True
+                                         ),
+                                    ]),
+                                ),
+                        ]),
+                    ], width=8),
+                    dbc.Col([
+                        dbc.Card([
+                            dbc.CardHeader('Choose the egg production model'),
+                            dbc.CardBody(
+                                dbc.Row([
+                                    html.Div([
+                                    daq.BooleanSwitch(
+                                        id='egg_toggle',
+                                        on=False
+                                        ),
+                                    html.Div(
+                                        id='egg_toggle_output',
+                                        style={'text-align':'center'}
+                                        ),])
+                                ])
+                            )
+                        ])
+                    ], width=3),
+                ]),
             dbc.Row([
                 dbc.Card([
                     dbc.CardHeader('Change map colorscale range'),
@@ -526,10 +548,19 @@ def global_store(r):
     [Output({'type':'biomass_slider', 'id':MATCH}, 'disabled'),
     Output({'type':'lice_slider', 'id':MATCH}, 'disabled')],
     Input({'type':'switch', 'id':MATCH},'on'),
-    #State({'type':'switch', 'id':MATCH},'on')
 )
 def desactivate_farms(switch):
     return not switch, not switch
+
+@app.callback(
+    Output('egg_toggle_output','children'),
+    Input('egg_toggle','on')
+)
+def toggle_egg_models(eggs):
+    if eggs:
+        return 'Stien (2005)'
+    else:
+        return 'Rittenhouse et al. (2016)'
 
 @app.callback(
     [Output({'type':'biomass_slider', 'id':ALL}, 'value'),
@@ -547,8 +578,11 @@ def update_all_sliders(lice, biom, l):
     Output('progress-curves','figure'),
     Output('heatmap_output', 'children')],
     [Input('submit_map','n_clicks'),
-    Input(ThemeSwitchAIO.ids.switch("theme"), "value"),],
-    [State({'type':'switch', 'id':ALL},'on'),
+    Input(ThemeSwitchAIO.ids.switch("theme"), "value"),
+    ],
+    [
+    State('egg_toggle','on'),
+    State({'type':'switch', 'id':ALL},'on'),
     State({'type':'biomass_slider', 'id':ALL},'value'),
     State({'type':'lice_slider', 'id':ALL},'value'),
     State('span-slider','value') ,
@@ -557,7 +591,7 @@ def update_all_sliders(lice, biom, l):
     State('progress-curves','figure'),
     ]
 )
-def redraw(n_clicks, toggle, idx, biomasses, lices, span, r, fig, curves):
+def redraw(n_clicks, toggle, egg, idx, biomasses, lices, span, r, fig, curves):
     ctx = dash.callback_context
     ### toggle themes
     template = template_theme1 if toggle else template_theme2
@@ -575,6 +609,9 @@ def redraw(n_clicks, toggle, idx, biomasses, lices, span, r, fig, curves):
         idx=np.array(idx)
         biomasses=np.array(biomasses)
         lices=np.array(lices)*2
+        # modify egg model from Rittenhouse (16.9) to Stein (30)
+        if egg:
+            lices *= 30/16.9
         if idx.sum()>0:
             name_list=np.array(All_names)[computed_farms][idx]
             Coeff=biomasses[idx]*lices[idx]
