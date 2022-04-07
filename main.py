@@ -608,7 +608,7 @@ def redraw(n_clicks, toggle, egg, idx, biomasses, lices, span, r, fig, curves):
     if ctx.triggered[0]['prop_id'] == 'submit_map.n_clicks':
         idx=np.array(idx)
         biomasses=np.array(biomasses)
-        lices=np.array(lices)*2
+        lices=np.array(lices, dtype='float')*2
         # modify egg model from Rittenhouse (16.9) to Stein (30)
         if egg:
             lices *= 30/16.9
