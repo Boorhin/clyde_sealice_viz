@@ -126,7 +126,7 @@ def make_base_figure(farm_loc,computed_farms, center_lat, center_lon, span, cmp,
                 ))
     fig.add_trace(go.Scattermapbox(name='Mapped farms'))
     fig.update_layout(
-                height=700,
+                height=500,
                 hovermode='closest',
                 showlegend=False,
                 margin=dict(b=3, l=2, r=5, t=5),
@@ -226,7 +226,7 @@ def mk_accordion_item(name, farm_loc, i, marks_biomass, marks_lice):
                     id={'type':'lice_slider','id':i},
                     step=0.05,
                     marks=marks_lice,
-                    value=1,
+                    value=0.5,
                     included=False,
                     tooltip={"placement": "bottom"},
                     disabled=False,
@@ -248,13 +248,16 @@ def tab2_layout(Filtered_names,farm_loc):
         2:'200%',
     }
     marks_lice={
-        0.5:'0.25',
-        1:'0.5',
-        2:'1',
-        4:'2',
-        6:'3',
-        8:'4',
-        10:'5',
+        0.25:'0.25',
+        0.5:'0.5',
+        1:'1',
+        2:'2',
+        3:'3',
+        4:'4',
+        5:'5',
+        6:'6',
+        7:'7',
+        8:'8'
     }
     layout= dbc.Card([
     dbc.Row([
@@ -324,7 +327,7 @@ def tab2_layout(Filtered_names,farm_loc):
                                 id='master_lice_slider',
                                 step=0.05,
                                 marks=marks_lice,
-                                value=1,
+                                value=0.5,
                                 tooltip={"placement": "bottom"},
 
                             )
@@ -571,7 +574,7 @@ def redraw(n_clicks, toggle, idx, biomasses, lices, span, r, fig, curves):
     if ctx.triggered[0]['prop_id'] == 'submit_map.n_clicks':
         idx=np.array(idx)
         biomasses=np.array(biomasses)
-        lices=np.array(lices)
+        lices=np.array(lices)*2
         if idx.sum()>0:
             name_list=np.array(All_names)[computed_farms][idx]
             Coeff=biomasses[idx]*lices[idx]
